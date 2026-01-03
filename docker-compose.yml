@@ -1,0 +1,10 @@
+services:
+ app:
+  build: .
+  ports: ["7736:7736"]
+  environment:
+   - MONGO_URL=mongodb://mongo/chat
+  depends_on: [mongo]
+ mongo:
+  image: mongo
+volumes: {}

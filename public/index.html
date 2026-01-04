@@ -52,11 +52,24 @@ body::after{
  text-align:center;
  padding:10px;
  border-bottom:1px solid rgba(0,255,255,.3);
+ position:relative;
 }
 .room{font-size:11px;color:#0aa}
+.status-dot{
+ display:inline-block;
+ width:8px;height:8px;
+ border-radius:50%;
+ margin-left:8px;
+}
+.status-online{background:#00ff00}
+.status-offline{background:#ff3b3b}
 .chat{flex:1;overflow-y:auto;padding:12px}
 .msg{margin-bottom:8px}
-.time{font-size:10px;color:#055;margin-right:6px}
+.time{
+ font-size:11px; /* Increased from 10px to 11px */
+ color:#055;
+ margin-right:6px;
+}
 .self{color:#00ffff}
 .other{color:#ff6b6b}
 .reply-ref{
@@ -76,10 +89,22 @@ body::after{
 }
 .cursor{margin-right:6px}
 input{flex:1;background:#000;border:none;color:#00ffcc;font-size:16px}
+.typing{
+ position:absolute;
+ bottom:-20px;
+ left:50%;
+ transform:translateX(-50%);
+ font-size:11px;
+ color:#0aa;
+}
 </style>
 </head>
 
 <body>
+
+<audio id="messageSound" preload="auto">
+  <source src="https://assets.mixkit.co/sfx/preview/mixkit-message-pop-alert-2354.mp3" type="audio/mpeg">
+</audio>
 
 <div id="loginScreen">
  <div class="login">
@@ -91,7 +116,11 @@ input{flex:1;background:#000;border:none;color:#00ffcc;font-size:16px}
 </div>
 
 <div id="app">
- <div class="header">⛧ CYBER IRC ⛧ <div id="roomName" class="room"></div></div>
+ <div class="header">
+   ⛧ CYBER IRC ⛧ 
+   <div id="roomName" class="room"></div>
+   <div id="onlineStatus" class="typing" style="display:none"></div>
+ </div>
  <div id="chat" class="chat"></div>
  <div id="replying" class="reply-ref" style="display:none"></div>
  <div class="input-wrap">
@@ -106,12 +135,17 @@ const socket = io();
 const chat = document.getElementById("chat");
 const input = document.getElementById("i");
 const replying = document.getElementById("replying");
+const messageSound = document.getElementById("messageSound");
+const onlineStatus = document.getElementById("onlineStatus");
 
 let USER = localStorage.getItem("user");
 let ROOM = localStorage.getItem("room");
 let replyTo = null;
 let typingTimer;
 let encrypted = false;
+let clearedTimestamp = 0;
+let onlineUsers = new Set();
+let userLastSeen = {};
 
 if(USER && ROOM) start();
 
@@ -123,35 +157,140 @@ function enter(){
  start();
 }
 
-function start(){
+async function start(){
  loginScreen.style.display="none";
  app.style.display="flex";
  roomName.innerText="#"+ROOM;
  socket.emit("join",{user:USER,room:ROOM});
+ 
+ // Get cleared timestamp from server
+ try {
+   const response = await fetch('/api/user-info', {
+     method: 'POST',
+     headers: {'Content-Type':'application/json'},
+     body: JSON.stringify({username:USER})
+   });
+   if(response.ok){
+     const data = await response.json();
+     if(data.clearedRooms && data.clearedRooms[ROOM]){
+       clearedTimestamp = data.clearedRooms[ROOM];
+     }
+   }
+ } catch(err){
+   console.log("Could not fetch user info");
+ }
 }
 
 /* ---------- HISTORY ---------- */
 socket.on("history", msgs => {
  chat.innerHTML="";
- msgs.forEach(render);
+ // Filter out messages before cleared timestamp
+ const filteredMsgs = clearedTimestamp > 0 
+   ? msgs.filter(m => new Date(m.created).getTime() > clearedTimestamp)
+   : msgs;
+ filteredMsgs.forEach(render);
 
  if (document.visibilityState === "visible") {
-  msgs.forEach(m=>{
-   if(m.user!==USER){
-    socket.emit("msg:read", m._id);
-   }
-  });
+   filteredMsgs.forEach(m=>{
+    if(m.user!==USER){
+     socket.emit("msg:read", m._id);
+    }
+   });
  }
  chat.scrollTop=chat.scrollHeight;
 });
 
 /* ---------- NEW MESSAGE ---------- */
 socket.on("msg", m=>{
- render(m);
+ // Play sound for new messages
+ playMessageSound();
+ 
+ // Render with typewriter effect
+ renderWithTypewriter(m);
+ 
  if(m.user!==USER && document.visibilityState==="visible"){
   socket.emit("msg:read", m._id);
  }
 });
+
+/* ---------- PLAY MESSAGE SOUND ---------- */
+function playMessageSound(){
+ try {
+   messageSound.currentTime = 0;
+   messageSound.play().catch(e => console.log("Audio play failed:", e));
+ } catch(err){
+   console.log("Sound error:", err);
+ }
+}
+
+/* ---------- TYPEWRITER EFFECT ---------- */
+function renderWithTypewriter(m){
+ const el=document.createElement("div");
+ el.className="msg";
+ el.dataset.id=m._id;
+
+ el.innerHTML=`
+ ${m.replyTo?`<div class="reply-ref">↪ ${m.replyTo.user}: ${m.replyTo.text.slice(0,40)}</div>`:""}
+ <span class="time">[${new Date(m.created).toLocaleTimeString([],{
+  hour:"2-digit",minute:"2-digit"})}]</span>
+ <span class="${m.user===USER?'self':'other'}">${m.user}@${ROOM}</span>
+ :: <span class="text"></span>
+ ${m.user===USER?`<span class="tick delivered">✔</span>`:""}
+ `;
+ 
+ // Add last seen indicator for other users
+ if(m.user !== USER && !onlineUsers.has(m.user)){
+   const lastSeen = userLastSeen[m.user];
+   if(lastSeen){
+     const lastSeenEl = document.createElement("span");
+     lastSeenEl.className = "last-seen";
+     lastSeenEl.style.fontSize = "9px";
+     lastSeenEl.style.color = "#055";
+     lastSeenEl.style.marginLeft = "6px";
+     lastSeenEl.innerText = `(last seen ${formatLastSeen(lastSeen)})`;
+     el.querySelector(`.${m.user===USER?'self':'other'}`).after(lastSeenEl);
+   }
+ }
+ 
+ chat.appendChild(el);
+ chat.scrollTop=chat.scrollHeight;
+
+ // Typewriter effect
+ const textEl = el.querySelector(".text");
+ const fullText = m.text;
+ let i = 0;
+ 
+ function typeWriter(){
+   if(i < fullText.length){
+     textEl.innerHTML += fullText.charAt(i);
+     i++;
+     setTimeout(typeWriter, 30); // Adjust speed here
+   }
+ }
+ 
+ // Start typing effect
+ setTimeout(() => typeWriter(), 100);
+
+ el.onclick=()=>{
+  replyTo={messageId:m._id,user:m.user,text:m.text,created:m.created};
+  replying.innerText=`↪ replying to ${m.user}`;
+  replying.style.display="block";
+ };
+}
+
+/* ---------- FORMAT LAST SEEN ---------- */
+function formatLastSeen(timestamp){
+ const now = Date.now();
+ const diff = now - timestamp;
+ const minutes = Math.floor(diff / (1000 * 60));
+ const hours = Math.floor(diff / (1000 * 60 * 60));
+ const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+ 
+ if(minutes < 1) return "just now";
+ if(minutes < 60) return `${minutes}m ago`;
+ if(hours < 24) return `${hours}h ago`;
+ return `${days}d ago`;
+}
 
 /* ---------- READ RECEIPT ---------- */
 socket.on("msg:read", data => {
@@ -162,6 +301,42 @@ socket.on("msg:read", data => {
  tick.classList.remove("delivered");
  tick.classList.add("read");
 });
+
+/* ---------- USER ONLINE/OFFLINE STATUS ---------- */
+socket.on("user:online", ({ user, lastSeen }) => {
+ onlineUsers.add(user);
+ updateOnlineStatus();
+ 
+ if(user !== USER){
+   onlineStatus.style.display = "block";
+   onlineStatus.innerHTML = `<span style="color:#00ff00">●</span> ${user} is online`;
+   setTimeout(() => {
+     onlineStatus.style.display = "none";
+   }, 3000);
+ }
+});
+
+socket.on("user:offline", ({ user, lastSeen }) => {
+ onlineUsers.delete(user);
+ userLastSeen[user] = lastSeen;
+ updateOnlineStatus();
+ 
+ if(user !== USER){
+   onlineStatus.style.display = "block";
+   onlineStatus.innerHTML = `<span style="color:#ff3b3b">●</span> ${user} is offline`;
+   setTimeout(() => {
+     onlineStatus.style.display = "none";
+   }, 3000);
+ }
+});
+
+function updateOnlineStatus(){
+ const onlineCount = onlineUsers.size;
+ const statusText = onlineCount > 1 ? 
+   `${onlineCount-1} other user${onlineCount-1 > 1 ? 's' : ''} online` : 
+   'You are alone';
+ onlineStatus.innerHTML = `<span style="color:#0ff">●</span> ${statusText}`;
+}
 
 /* ===============================
    🔥 REAL-TIME WHATSAPP FIX 🔥
@@ -220,7 +395,14 @@ input.onkeydown=e=>{
  const text=input.value.trim();
  if(!text) return;
 
- if(text==="/clear"){chat.innerHTML="";input.value="";return;}
+ if(text==="/clear"){
+   // Clear only for this user
+   socket.emit("clear:history");
+   chat.innerHTML="<div style='color:#0aa;text-align:center;padding:20px;'>Chat cleared for you</div>";
+   clearedTimestamp = Date.now();
+   input.value="";
+   return;
+ }
  if(text==="/leave"){localStorage.clear();location.reload();return;}
  if(text==="/encrypt"){encrypted=true;toggleEncrypt(true);input.value="";return;}
  if(text==="/decrypt"){encrypted=false;toggleEncrypt(false);input.value="";return;}
@@ -231,11 +413,42 @@ input.onkeydown=e=>{
  input.value="";
 };
 
-/* ---------- RENDER ---------- */
+/* ---------- CLEAR COMPLETE ---------- */
+socket.on("clear:complete", () => {
+ console.log("Chat history cleared for this user");
+});
+
+/* ---------- LAST SEEN REQUEST ---------- */
+function requestLastSeen(user){
+ socket.emit("lastseen:request", { user });
+}
+
+socket.on("lastseen:response", ({ user, timestamp, isOnline }) => {
+ userLastSeen[user] = timestamp;
+ // Update UI if needed
+ const userElements = document.querySelectorAll(`[data-user="${user}"]`);
+ userElements.forEach(el => {
+   const indicator = el.querySelector('.last-seen');
+   if(indicator && !isOnline){
+     indicator.innerText = `(last seen ${formatLastSeen(timestamp)})`;
+   }
+ });
+});
+
+/* ---------- CANCEL REPLY ---------- */
+document.addEventListener("click",e=>{
+ if(!e.target.closest(".msg") && !e.target.closest(".input-wrap")){
+  replyTo=null;
+  replying.style.display="none";
+ }
+});
+
+/* ---------- REGULAR RENDER (for history) ---------- */
 function render(m){
  const el=document.createElement("div");
  el.className="msg";
  el.dataset.id=m._id;
+ el.dataset.user=m.user;
 
  el.innerHTML=`
  ${m.replyTo?`<div class="reply-ref">↪ ${m.replyTo.user}: ${m.replyTo.text.slice(0,40)}</div>`:""}
@@ -245,24 +458,30 @@ function render(m){
  :: <span class="text">${m.text}</span>
  ${m.user===USER?`<span class="tick delivered">✔</span>`:""}
  `;
+ 
+ // Add last seen indicator for other users
+ if(m.user !== USER && !onlineUsers.has(m.user)){
+   const lastSeen = userLastSeen[m.user];
+   if(lastSeen){
+     const lastSeenEl = document.createElement("span");
+     lastSeenEl.className = "last-seen";
+     lastSeenEl.style.fontSize = "9px";
+     lastSeenEl.style.color = "#055";
+     lastSeenEl.style.marginLeft = "6px";
+     lastSeenEl.innerText = `(last seen ${formatLastSeen(lastSeen)})`;
+     el.querySelector(`.${m.user===USER?'self':'other'}`).after(lastSeenEl);
+   }
+ }
+ 
  chat.appendChild(el);
+ chat.scrollTop=chat.scrollHeight;
 
  el.onclick=()=>{
   replyTo={messageId:m._id,user:m.user,text:m.text,created:m.created};
   replying.innerText=`↪ replying to ${m.user}`;
   replying.style.display="block";
  };
- chat.scrollTop=chat.scrollHeight;
 }
-
-/* CANCEL REPLY */
-document.addEventListener("click",e=>{
- if(!e.target.closest(".msg") && !e.target.closest(".input-wrap")){
-  replyTo=null;
-  replying.style.display="none";
- }
-});
 </script>
 </body>
 </html>
-

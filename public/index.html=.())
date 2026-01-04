@@ -221,37 +221,77 @@ function start(user, room){
   render(m);
  });
 }
+
 function render(m){
  const t = new Date(m.created || Date.now())
   .toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
  const self = m.user === USER;
 
- const msgEl = document.createElement("div");
- msgEl.className = "msg";
-
- msgEl.innerHTML = `
+ chat.innerHTML += `
+ <div class="msg">
   ${pendingReply ? `<div class="reply-ref">↪ ${pendingReply.user}@${pendingReply.time}</div>` : ""}
   <span class="time">[${t}]</span>
   <span class="prompt ${self?'self':'other'}">${self?'$':'#'} ${m.user}@${ROOM}</span>
-  :: <span class="text"></span>
- `;
-
- chat.appendChild(msgEl);
-
- const textEl = msgEl.querySelector(".text");
- const text = m.text;
- let i = 0;
-
- const typer = setInterval(() => {
-  textEl.textContent += text[i++];
-  if(i >= text.length){
-   clearInterval(typer);
-   if(autoScroll) chat.scrollTop = chat.scrollHeight;
-  }
- }, 18); // speed (ms)
+  :: ${m.text}
+ </div>`;
 
  pendingReply = null;
+ if(autoScroll) chat.scrollTop = chat.scrollHeight;
 }
 </script>
 </body>
-</html>
+</){
+html>
+.",
+	
+function render(m){
+ const t = new Date(m.created || Date.now())
+  .toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+ const self = m.user === USER;
+
+ chat.innerHTML += `
+ <div class="msg">
+  ${pendingReply ? `<div class="reply-ref">↪ ${pendingReply.user}@${pendingReply.time}</div>` : ""}
+  <span class="time">[${t}]</span>
+  <span class="prompt ${self?'self':'other'}">${self?'$':'#'} ${m.user}@${ROOM}</span>
+  :: ${m.text}
+ </div>`;
+
+ pendingReply = null;
+ if(autoScroll) chat.scrollTop = chat.scrollHeight;
+}
+=
+
+.function render(m){
+ const t = new Date(m.created || Date.now())
+  .toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+ const self = m.user === USER;
+
+ chat.innerHTML += `
+ <div class="msg">
+  ${pendingReply ? `<div class="reply-ref">↪ ${pendingReply.user}@${pendingReply.time}</div>` : ""}
+  <span class="time">[${t}]</span>
+  <span class="prompt ${self?'self':'other'}">${self?'$':'#'} ${m.user}@${ROOM}</span>
+  :: ${m.text}
+ </div>`;
+
+ pendingReply = null;
+ if(autoScroll) chat.scrollTop = chat.scrollHeight;
+}
+
+
+
+
+=
+"
+.	
+}<
+>`
+:
+""}
+
+<
+>
+="">{
+?'<
+="

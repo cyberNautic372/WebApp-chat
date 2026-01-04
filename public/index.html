@@ -135,15 +135,13 @@ socket.on("history", msgs => {
  chat.innerHTML="";
  msgs.forEach(render);
 
- // 🔥 FIX: reopen browser → mark delivered as read
  if (document.visibilityState === "visible") {
   msgs.forEach(m=>{
-   if(m.user!==USER && m.status==="delivered"){
+   if(m.user!==USER){
     socket.emit("msg:read", m._id);
    }
   });
  }
-
  chat.scrollTop=chat.scrollHeight;
 });
 
@@ -157,27 +155,33 @@ socket.on("msg", m=>{
 
 /* ---------- READ RECEIPT ---------- */
 socket.on("msg:read", data => {
-  const el = document.querySelector(`[data-id="${data.id}"]`);
-  if (!el) return;
-
-  const tick = el.querySelector(".tick");
-  if (!tick) return;
-
-  tick.classList.remove("delivered");
-  tick.classList.add("read");
+ const el=document.querySelector(`[data-id="${data.id}"]`);
+ if(!el) return;
+ const tick=el.querySelector(".tick");
+ if(!tick) return;
+ tick.classList.remove("delivered");
+ tick.classList.add("read");
 });
 
-/* ---------- VISIBILITY CHANGE ---------- */
-window.addEventListener("focus", () => {
-  document.querySelectorAll(".msg").forEach(el => {
-    const id = el.dataset.id;
-    const tick = el.querySelector(".tick");
-
-    if (id && tick && tick.classList.contains("delivered")) {
-      socket.emit("msg:read", id);
-    }
-  });
+/* ===============================
+   🔥 REAL-TIME WHATSAPP FIX 🔥
+   =============================== */
+function markDeliveredAsRead(){
+ document.querySelectorAll(".msg").forEach(el=>{
+  const id=el.dataset.id;
+  const tick=el.querySelector(".tick");
+  if(id && tick && tick.classList.contains("delivered")){
+   socket.emit("msg:read",id);
+  }
+ });
+}
+document.addEventListener("visibilitychange",()=>{
+ if(document.visibilityState==="visible"){
+  markDeliveredAsRead();
+ }
 });
+window.addEventListener("focus", markDeliveredAsRead);
+/* =============================== */
 
 /* ---------- TYPING ---------- */
 input.oninput=()=>{
@@ -185,12 +189,10 @@ input.oninput=()=>{
  clearTimeout(typingTimer);
  typingTimer=setTimeout(()=>socket.emit("typing:stop"),600);
 };
-
 socket.on("typing:start",u=>{
  replying.innerText=`${u} typing…`;
  replying.style.display="block";
 });
-
 socket.on("typing:stop",()=>{
  if(!replyTo) replying.style.display="none";
 });
@@ -200,7 +202,6 @@ function toggleEncrypt(on){
  document.querySelectorAll(".msg").forEach(el=>{
   const textEl=el.querySelector(".text");
   if(!textEl) return;
-
   if(on){
    if(!el.dataset.raw) el.dataset.raw=textEl.textContent;
    textEl.textContent=textEl.textContent
@@ -219,22 +220,10 @@ input.onkeydown=e=>{
  const text=input.value.trim();
  if(!text) return;
 
- if(text==="/clear"){
-  chat.innerHTML="";
-  input.value="";
-  return;
- }
- if(text==="/leave"){
-  localStorage.clear();
-  location.reload();
-  return;
- }
- if(text==="/encrypt"){
-  encrypted=true; toggleEncrypt(true); input.value=""; return;
- }
- if(text==="/decrypt"){
-  encrypted=false; toggleEncrypt(false); input.value=""; return;
- }
+ if(text==="/clear"){chat.innerHTML="";input.value="";return;}
+ if(text==="/leave"){localStorage.clear();location.reload();return;}
+ if(text==="/encrypt"){encrypted=true;toggleEncrypt(true);input.value="";return;}
+ if(text==="/decrypt"){encrypted=false;toggleEncrypt(false);input.value="";return;}
 
  socket.emit("msg",{text,replyTo});
  replyTo=null;
@@ -254,9 +243,8 @@ function render(m){
   hour:"2-digit",minute:"2-digit"})}]</span>
  <span class="${m.user===USER?'self':'other'}">${m.user}@${ROOM}</span>
  :: <span class="text">${m.text}</span>
- ${m.user===USER?`<span class="tick ${m.status}">✔</span>`:""}
+ ${m.user===USER?`<span class="tick delivered">✔</span>`:""}
  `;
-
  chat.appendChild(el);
 
  el.onclick=()=>{
@@ -264,9 +252,16 @@ function render(m){
   replying.innerText=`↪ replying to ${m.user}`;
   replying.style.display="block";
  };
-
  chat.scrollTop=chat.scrollHeight;
 }
+
+/* CANCEL REPLY */
+document.addEventListener("click",e=>{
+ if(!e.target.closest(".msg") && !e.target.closest(".input-wrap")){
+  replyTo=null;
+  replying.style.display="none";
+ }
+});
 </script>
 </body>
 </html>

@@ -13,12 +13,14 @@ const ReplySchema = new mongoose.Schema(
 const MessageSchema = new mongoose.Schema({
   user: {
     type: String,
-    required: true
+    required: true,
+    index: true
   },
 
   room: {
     type: String,
-    required: true
+    required: true,
+    index: true
   },
 
   text: {
@@ -28,13 +30,20 @@ const MessageSchema = new mongoose.Schema({
 
   replyTo: ReplySchema,
 
-  // 🔥 WHO HAS READ THIS MESSAGE
+  /**
+   * 🔥 SOURCE OF TRUTH
+   * kis-kis ne read kiya
+   */
   readBy: {
     type: [String],
-    default: []
+    default: [],
+    index: true
   },
 
-  // UI helper (not source of truth)
+  /**
+   * ⚠️ DERIVED FIELD (UI ONLY)
+   * server kabhi trust nahi karega isko
+   */
   status: {
     type: String,
     enum: ["delivered", "read"],
@@ -43,9 +52,20 @@ const MessageSchema = new mongoose.Schema({
 
   created: {
     type: Date,
-    default: Date.now
+    default: Date.now,
+    index: true
   }
 });
 
-module.exports = mongoose.model("Message", MessageSchema);
+/**
+ * 🔥 AUTO SYNC STATUS (safety net)
+ * agar kisi ne readBy me add hua → status = read
+ */
+MessageSchema.pre("save", function (next) {
+  if (Array.isArray(this.readBy) && this.readBy.length > 0) {
+    this.status = "read";
+  }
+  next();
+});
 
+module.exports = mongoose.model("Message", MessageSchema);

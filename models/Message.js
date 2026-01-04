@@ -1,9 +1,18 @@
-const m=require("mongoose");
-const s=new m.Schema({
- user:String,
- room:String,
- text:String,
- created:{type:Date,default:Date.now}
+const mongoose = require("mongoose");
+
+const ReplySchema = new mongoose.Schema({
+  messageId: mongoose.Schema.Types.ObjectId,
+  user: String,
+  text: String,
+  created: Date
+},{ _id:false });
+
+const MessageSchema = new mongoose.Schema({
+  user: { type:String, required:true },
+  room: { type:String, required:true },
+  text: { type:String, required:true },
+  replyTo: ReplySchema,
+  created: { type:Date, default:Date.now }
 });
-s.index({room:1,created:-1});
-module.exports=m.model("Message",s);
+
+module.exports = mongoose.model("Message", MessageSchema);

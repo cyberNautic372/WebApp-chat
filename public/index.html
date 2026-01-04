@@ -141,116 +141,131 @@ const replying = document.getElementById("replying");
 
 let USER, ROOM;
 let replyTo = null;
-let pendingReply = null;
 let autoScroll = true;
+let typingTimer;
 
-/* clear timestamp */
 function clearedAt(){
  return Number(localStorage.getItem("clearedAt") || 0);
 }
 
-/* Restore */
 const su = localStorage.getItem("user");
 const sr = localStorage.getItem("room");
 if(su && sr) start(su, sr);
 
 function enter(){
- const u = document.getElementById("u").value.trim();
- const r = document.getElementById("r").value.trim();
- if(!u || !r) return;
- localStorage.setItem("user", u);
- localStorage.setItem("room", r);
- start(u, r);
+ const u=document.getElementById("u").value.trim();
+ const r=document.getElementById("r").value.trim();
+ if(!u||!r) return;
+ localStorage.setItem("user",u);
+ localStorage.setItem("room",r);
+ start(u,r);
 }
 
-function start(user, room){
- USER = user; ROOM = room;
- loginScreen.style.display = "none";
- app.style.display = "flex";
- document.getElementById("roomName").innerText = "#" + room;
+function start(user,room){
+ USER=user; ROOM=room;
+ loginScreen.style.display="none";
+ app.style.display="flex";
+ roomName.innerText="#"+room;
 
- socket.emit("join", { user, room });
+ socket.emit("join",{user,room});
  input.focus();
 
- chat.onscroll = () => {
-  autoScroll = chat.scrollTop + chat.clientHeight >= chat.scrollHeight - 10;
+ chat.onscroll=()=>autoScroll =
+  chat.scrollTop+chat.clientHeight>=chat.scrollHeight-10;
+
+ input.oninput=()=>{
+  socket.emit("typing:start");
+  clearTimeout(typingTimer);
+  typingTimer=setTimeout(()=>socket.emit("typing:stop"),700);
  };
 
- input.onkeydown = e => {
-  if(e.key === "Enter" && input.value.trim()){
-   const val = input.value.trim();
+ input.onkeydown=e=>{
+  if(e.key==="Enter" && input.value.trim()){
+   const text=input.value.trim();
 
-   if(val === "/clear"){
-    chat.innerHTML = "";
-    localStorage.setItem("clearedAt", Date.now());
-    input.value = "";
+   if(text==="/clear"){
+    chat.innerHTML="";
+    localStorage.setItem("clearedAt",Date.now());
+    input.value="";
     return;
    }
 
-   if(val === "/leave"){
-    localStorage.clear();
-    location.reload();
-    return;
-   }
+   socket.emit("msg",{ text, replyTo });
 
-   pendingReply = replyTo;
-   socket.emit("msg", val);   // STRING ONLY
-   input.value = "";
-   replyTo = null;
-   replying.style.display = "none";
+   replyTo=null;
+   replying.style.display="none";
+   input.value="";
+   socket.emit("typing:stop");
   }
  };
 
- socket.off("history");
- socket.off("msg");
-
- socket.on("history", msgs => {
-  chat.innerHTML = "";
-  const cut = clearedAt();
-
+ socket.off();
+ socket.on("history",msgs=>{
+  chat.innerHTML="";
   msgs
-   .filter(m => new Date(m.created).getTime() > cut)
-   .sort((a,b)=>new Date(a.created)-new Date(b.created)) // ✅ ORDER FIX
+   .filter(m=>new Date(m.created).getTime()>clearedAt())
    .forEach(render);
-
-  chat.scrollTop = chat.scrollHeight;
+  chat.scrollTop=chat.scrollHeight;
  });
 
- socket.on("msg", m => {
-  if(new Date(m.created).getTime() <= clearedAt()) return;
+ socket.on("msg",m=>{
+  if(new Date(m.created).getTime()<=clearedAt()) return;
   render(m);
  });
+
+ socket.on("typing:start",u=>{
+  replying.innerText=`${u} typing…`;
+  replying.style.display="block";
+ });
+
+ socket.on("typing:stop",()=>{
+  if(!replyTo) replying.style.display="none";
+ });
 }
+
 function render(m){
- const t = new Date(m.created || Date.now())
-  .toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
- const self = m.user === USER;
+ const t=new Date(m.created).toLocaleTimeString([],{
+  hour:"2-digit",minute:"2-digit"
+ });
+ const self=m.user===USER;
 
- const msgEl = document.createElement("div");
- msgEl.className = "msg";
+ const el=document.createElement("div");
+ el.className="msg";
 
- msgEl.innerHTML = `
-  ${pendingReply ? `<div class="reply-ref">↪ ${pendingReply.user}@${pendingReply.time}</div>` : ""}
-  <span class="time">[${t}]</span>
-  <span class="prompt ${self?'self':'other'}">${self?'$':'#'} ${m.user}@${ROOM}</span>
-  :: <span class="text"></span>
+ el.innerHTML=`
+ ${m.replyTo?`
+  <div class="reply-ref">
+   ↪ ${m.replyTo.user}: ${m.replyTo.text.slice(0,40)}
+  </div>`:""}
+ <span class="time">[${t}]</span>
+ <span class="prompt ${self?'self':'other'}">
+  ${self?'$':'#'} ${m.user}@${ROOM}
+ </span>
+ :: <span class="text"></span>
  `;
 
- chat.appendChild(msgEl);
+ chat.appendChild(el);
 
- const textEl = msgEl.querySelector(".text");
- const text = m.text;
- let i = 0;
+ el.onclick=()=>{
+  replyTo={
+   messageId:m._id,
+   user:m.user,
+   text:m.text,
+   created:m.created
+  };
+  replying.innerText=`↪ replying to ${m.user}@${t}`;
+  replying.style.display="block";
+ };
 
- const typer = setInterval(() => {
-  textEl.textContent += text[i++];
-  if(i >= text.length){
+ const textEl=el.querySelector(".text");
+ let i=0;
+ const typer=setInterval(()=>{
+  textEl.textContent+=m.text[i++]||"";
+  if(i>=m.text.length){
    clearInterval(typer);
-   if(autoScroll) chat.scrollTop = chat.scrollHeight;
+   if(autoScroll) chat.scrollTop=chat.scrollHeight;
   }
- }, 18); // speed (ms)
-
- pendingReply = null;
+ },18);
 }
 </script>
 </body>

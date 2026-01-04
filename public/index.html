@@ -14,8 +14,6 @@ html,body{
  color:#00ffcc;
  overflow:hidden;
 }
-
-/* Scanlines */
 body::after{
  content:"";
  position:fixed;inset:0;
@@ -28,8 +26,6 @@ body::after{
  );
  opacity:.25;
 }
-
-/* LOGIN */
 #loginScreen{
  position:fixed;inset:0;
  display:flex;align-items:center;justify-content:center;
@@ -50,28 +46,19 @@ body::after{
  background:#000;border:1px solid rgba(0,255,255,.35);
  color:#00ffcc;
 }
-
-/* APP */
 #app{display:none;height:100dvh;flex-direction:column}
 .header{
  font-family:'Orbitron',sans-serif;
  text-align:center;
  padding:10px;
  border-bottom:1px solid rgba(0,255,255,.3);
- text-shadow:0 0 6px rgba(0,255,255,.6);
 }
 .room{font-size:11px;color:#0aa}
-
-/* CHAT */
 .chat{flex:1;overflow-y:auto;padding:12px}
-.msg{margin-bottom:8px;line-height:1.5}
-.msg:hover{background:rgba(0,255,255,.04)}
+.msg{margin-bottom:8px}
 .time{font-size:10px;color:#055;margin-right:6px}
-.prompt{font-size:11px;margin-right:6px}
 .self{color:#00ffff}
 .other{color:#ff6b6b}
-
-/* Reply preview */
 .reply-ref{
  font-size:11px;
  color:#0aa;
@@ -79,30 +66,21 @@ body::after{
  padding-left:6px;
  margin-bottom:4px;
 }
-
-/* INPUT */
+.tick{margin-left:6px}
+.delivered{color:#ff3b3b}
+.read{color:#8b5cf6}
 .input-wrap{
  display:flex;align-items:center;
  border-top:1px solid rgba(0,255,255,.3);
  background:#000;padding:10px;
 }
-.cursor{
- color:#0ff;margin-right:6px;
- animation:blink 1s steps(1) infinite;
-}
-input.msgbox{
- flex:1;background:#000;border:none;outline:none;
- color:#00ffcc;font-size:16px;
- font-family:'Share Tech Mono',monospace;
-}
-
-@keyframes blink{50%{opacity:0}}
+.cursor{margin-right:6px}
+input{flex:1;background:#000;border:none;color:#00ffcc;font-size:16px}
 </style>
 </head>
 
 <body>
 
-<!-- LOGIN -->
 <div id="loginScreen">
  <div class="login">
   <h3>ENTER IRC</h3>
@@ -112,161 +90,184 @@ input.msgbox{
  </div>
 </div>
 
-<!-- CHAT -->
 <div id="app">
- <div class="header">
-  ⛧ CYBER IRC ⛧
-  <div id="roomName" class="room"></div>
- </div>
-
+ <div class="header">⛧ CYBER IRC ⛧ <div id="roomName" class="room"></div></div>
  <div id="chat" class="chat"></div>
-
  <div id="replying" class="reply-ref" style="display:none"></div>
-
  <div class="input-wrap">
   <span class="cursor">$</span>
-  <input id="i" class="msgbox" placeholder="type message">
+  <input id="i" placeholder="type message">
  </div>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const socket = io();
-
-const loginScreen = document.getElementById("loginScreen");
-const app = document.getElementById("app");
 const chat = document.getElementById("chat");
 const input = document.getElementById("i");
 const replying = document.getElementById("replying");
 
-let USER, ROOM;
+let USER = localStorage.getItem("user");
+let ROOM = localStorage.getItem("room");
 let replyTo = null;
-let autoScroll = true;
 let typingTimer;
+let encrypted = false;
 
-function clearedAt(){
- return Number(localStorage.getItem("clearedAt") || 0);
-}
-
-const su = localStorage.getItem("user");
-const sr = localStorage.getItem("room");
-if(su && sr) start(su, sr);
+if(USER && ROOM) start();
 
 function enter(){
- const u=document.getElementById("u").value.trim();
- const r=document.getElementById("r").value.trim();
- if(!u||!r) return;
- localStorage.setItem("user",u);
- localStorage.setItem("room",r);
- start(u,r);
+ USER=u.value.trim();
+ ROOM=r.value.trim();
+ localStorage.setItem("user",USER);
+ localStorage.setItem("room",ROOM);
+ start();
 }
 
-function start(user,room){
- USER=user; ROOM=room;
+function start(){
  loginScreen.style.display="none";
  app.style.display="flex";
- roomName.innerText="#"+room;
+ roomName.innerText="#"+ROOM;
+ socket.emit("join",{user:USER,room:ROOM});
+}
 
- socket.emit("join",{user,room});
- input.focus();
+/* ---------- HISTORY ---------- */
+socket.on("history", msgs => {
+ chat.innerHTML="";
+ msgs.forEach(render);
 
- chat.onscroll=()=>autoScroll =
-  chat.scrollTop+chat.clientHeight>=chat.scrollHeight-10;
-
- input.oninput=()=>{
-  socket.emit("typing:start");
-  clearTimeout(typingTimer);
-  typingTimer=setTimeout(()=>socket.emit("typing:stop"),700);
- };
-
- input.onkeydown=e=>{
-  if(e.key==="Enter" && input.value.trim()){
-   const text=input.value.trim();
-
-   if(text==="/clear"){
-    chat.innerHTML="";
-    localStorage.setItem("clearedAt",Date.now());
-    input.value="";
-    return;
+ // 🔥 FIX: reopen browser → mark delivered as read
+ if (document.visibilityState === "visible") {
+  msgs.forEach(m=>{
+   if(m.user!==USER && m.status==="delivered"){
+    socket.emit("msg:read", m._id);
    }
+  });
+ }
 
-   socket.emit("msg",{ text, replyTo });
+ chat.scrollTop=chat.scrollHeight;
+});
 
-   replyTo=null;
-   replying.style.display="none";
-   input.value="";
-   socket.emit("typing:stop");
+/* ---------- NEW MESSAGE ---------- */
+socket.on("msg", m=>{
+ render(m);
+ if(m.user!==USER && document.visibilityState==="visible"){
+  socket.emit("msg:read", m._id);
+ }
+});
+
+/* ---------- READ RECEIPT ---------- */
+socket.on("msg:read", data => {
+  const el = document.querySelector(`[data-id="${data.id}"]`);
+  if (!el) return;
+
+  const tick = el.querySelector(".tick");
+  if (!tick) return;
+
+  tick.classList.remove("delivered");
+  tick.classList.add("read");
+});
+
+/* ---------- VISIBILITY CHANGE ---------- */
+window.addEventListener("focus", () => {
+  document.querySelectorAll(".msg").forEach(el => {
+    const id = el.dataset.id;
+    const tick = el.querySelector(".tick");
+
+    if (id && tick && tick.classList.contains("delivered")) {
+      socket.emit("msg:read", id);
+    }
+  });
+});
+
+/* ---------- TYPING ---------- */
+input.oninput=()=>{
+ socket.emit("typing:start");
+ clearTimeout(typingTimer);
+ typingTimer=setTimeout(()=>socket.emit("typing:stop"),600);
+};
+
+socket.on("typing:start",u=>{
+ replying.innerText=`${u} typing…`;
+ replying.style.display="block";
+});
+
+socket.on("typing:stop",()=>{
+ if(!replyTo) replying.style.display="none";
+});
+
+/* ---------- ENCRYPT ---------- */
+function toggleEncrypt(on){
+ document.querySelectorAll(".msg").forEach(el=>{
+  const textEl=el.querySelector(".text");
+  if(!textEl) return;
+
+  if(on){
+   if(!el.dataset.raw) el.dataset.raw=textEl.textContent;
+   textEl.textContent=textEl.textContent
+    .split("")
+    .map(c=>String.fromCharCode(0x4e00+(c.charCodeAt(0)%2000)))
+    .join("");
+  }else if(el.dataset.raw){
+   textEl.textContent=el.dataset.raw;
   }
- };
-
- socket.off();
- socket.on("history",msgs=>{
-  chat.innerHTML="";
-  msgs
-   .filter(m=>new Date(m.created).getTime()>clearedAt())
-   .forEach(render);
-  chat.scrollTop=chat.scrollHeight;
- });
-
- socket.on("msg",m=>{
-  if(new Date(m.created).getTime()<=clearedAt()) return;
-  render(m);
- });
-
- socket.on("typing:start",u=>{
-  replying.innerText=`${u} typing…`;
-  replying.style.display="block";
- });
-
- socket.on("typing:stop",()=>{
-  if(!replyTo) replying.style.display="none";
  });
 }
 
-function render(m){
- const t=new Date(m.created).toLocaleTimeString([],{
-  hour:"2-digit",minute:"2-digit"
- });
- const self=m.user===USER;
+/* ---------- INPUT ---------- */
+input.onkeydown=e=>{
+ if(e.key!=="Enter") return;
+ const text=input.value.trim();
+ if(!text) return;
 
+ if(text==="/clear"){
+  chat.innerHTML="";
+  input.value="";
+  return;
+ }
+ if(text==="/leave"){
+  localStorage.clear();
+  location.reload();
+  return;
+ }
+ if(text==="/encrypt"){
+  encrypted=true; toggleEncrypt(true); input.value=""; return;
+ }
+ if(text==="/decrypt"){
+  encrypted=false; toggleEncrypt(false); input.value=""; return;
+ }
+
+ socket.emit("msg",{text,replyTo});
+ replyTo=null;
+ replying.style.display="none";
+ input.value="";
+};
+
+/* ---------- RENDER ---------- */
+function render(m){
  const el=document.createElement("div");
  el.className="msg";
+ el.dataset.id=m._id;
 
  el.innerHTML=`
- ${m.replyTo?`
-  <div class="reply-ref">
-   ↪ ${m.replyTo.user}: ${m.replyTo.text.slice(0,40)}
-  </div>`:""}
- <span class="time">[${t}]</span>
- <span class="prompt ${self?'self':'other'}">
-  ${self?'$':'#'} ${m.user}@${ROOM}
- </span>
- :: <span class="text"></span>
+ ${m.replyTo?`<div class="reply-ref">↪ ${m.replyTo.user}: ${m.replyTo.text.slice(0,40)}</div>`:""}
+ <span class="time">[${new Date(m.created).toLocaleTimeString([],{
+  hour:"2-digit",minute:"2-digit"})}]</span>
+ <span class="${m.user===USER?'self':'other'}">${m.user}@${ROOM}</span>
+ :: <span class="text">${m.text}</span>
+ ${m.user===USER?`<span class="tick ${m.status}">✔</span>`:""}
  `;
 
  chat.appendChild(el);
 
  el.onclick=()=>{
-  replyTo={
-   messageId:m._id,
-   user:m.user,
-   text:m.text,
-   created:m.created
-  };
-  replying.innerText=`↪ replying to ${m.user}@${t}`;
+  replyTo={messageId:m._id,user:m.user,text:m.text,created:m.created};
+  replying.innerText=`↪ replying to ${m.user}`;
   replying.style.display="block";
  };
 
- const textEl=el.querySelector(".text");
- let i=0;
- const typer=setInterval(()=>{
-  textEl.textContent+=m.text[i++]||"";
-  if(i>=m.text.length){
-   clearInterval(typer);
-   if(autoScroll) chat.scrollTop=chat.scrollHeight;
-  }
- },18);
+ chat.scrollTop=chat.scrollHeight;
 }
 </script>
 </body>
 </html>
+

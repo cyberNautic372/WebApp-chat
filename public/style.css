@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<title>Cyber IRC</title>
+
+<style>
+*{box-sizing:border-box}
+html,body{
+ margin:0;height:100%;
+ background:#04060b;
+ font-family:'Share Tech Mono',monospace;
+ color:#00ffcc;
+ overflow:hidden;
+}
+body::after{
+ content:"";
+ position:fixed;inset:0;
+ pointer-events:none;
+ background:repeating-linear-gradient(
+  to bottom,
+  rgba(0,0,0,0) 0px,
+  rgba(0,0,0,0) 2px,
+  rgba(0,0,0,.15) 3px
+ );
+ opacity:.25;
+}
+#loginScreen{
+ position:fixed;inset:0;
+ display:flex;align-items:center;justify-content:center;
+ background:#04060b;z-index:100;
+}
+.login{
+ width:90%;max-width:320px;
+ border:1px solid rgba(0,255,255,.3);
+ padding:22px;
+}
+.login h3{
+ font-family:'Orbitron',sans-serif;
+ color:#0ff;text-align:center;
+ letter-spacing:2px;
+}
+.login input,.login button{
+ width:100%;margin:10px 0;padding:10px;
+ background:#000;border:1px solid rgba(0,255,255,.35);
+ color:#00ffcc;
+}
+#app{display:none;height:100dvh;flex-direction:column}
+.header{
+ font-family:'Orbitron',sans-serif;
+ text-align:center;
+ padding:10px;
+ border-bottom:1px solid rgba(0,255,255,.3);
+}
+.room{font-size:11px;color:#0aa}
+.chat{flex:1;overflow-y:auto;padding:12px}
+.msg{margin-bottom:8px}
+.time{font-size:10px;color:#055;margin-right:6px}
+.self{color:#00ffff}
+.other{color:#ff6b6b}
+.reply-ref{
+ font-size:11px;
+ color:#0aa;
+ border-left:2px solid #0ff;
+ padding-left:6px;
+ margin-bottom:4px;
+}
+.tick{margin-left:6px}
+.delivered{color:#ff3b3b}
+.read{color:#8b5cf6}
+.input-wrap{
+ display:flex;align-items:center;
+ border-top:1px solid rgba(0,255,255,.3);
+ background:#000;padding:10px;
+}
+.cursor{margin-right:6px}
+input{flex:1;background:#000;border:none;color:#00ffcc;font-size:16px}
+</style>
+</head>
+
+<body>
+
+<div id="loginScreen">
+ <div class="login">
+  <h3>ENTER IRC</h3>
+  <input id="u" placeholder="username">
+  <input id="r" placeholder="room">
+  <button onclick="enter()">CONNECT</button>
+ </div>
+</div>
+
+<div id="app">
+ <div class="header">⛧ CYBER IRC ⛧ <div id="roomName" class="room"></div></div>
+ <div id="chat" class="chat"></div>
+ <div id="replying" class="reply-ref" style="display:none"></div>
+ <div class="input-wrap">
+  <span class="cursor">$</span>
+  <input id="i" placeholder="type message">
+ </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+const chat = document.getElementById("chat");
+const input = document.getElementById("i");
+const replying = document.getElementById("replying");
+
+let USER = localStorage.getItem("user");
+let ROOM = localStorage.getItem("room");
+let replyTo = null;
+let typingTimer;
+
+if(USER && ROOM) start();
+
+function enter(){
+ USER=u.value.trim();
+ ROOM=r.value.trim();
+ localStorage.setItem("user",USER);
+ localStorage.setItem("room",ROOM);
+ start();
+}
+
+function start(){
+ loginScreen.style.display="none";
+ app.style.display="flex";
+ roomName.innerText="#"+ROOM;
+ socket.emit("join",{user:USER,room:ROOM});
+}
+
+
+
+="";
+((socketon("msg",m=>{
+ render(m);				
+===
+"
+		")
+{
+
+
+
+ // READ ONLY WHEN USER IS ACTIVE ON SCREEN
+ if(
+  m.user !== USER &&
+  document.visibilityState === "visible"
+ ){
+  socket.emit("msg:read", m._id);
+ }
+});
+
+socket.on("msg:read",id=>{
+ const el=document.querySelector(`[data-id="${id}"] .tick`);
+ if(el){
+  el.classList.remove("delivered");
+  el.classList.add("read");
+ }
+});
+
+input.oninput=()=>{
+ socket.emit("typing:start");
+ clearTimeout(typingTimer);
+ typingTimer=setTimeout(()=>socket.emit("typing:stop"),600);
+};
+
+socket.on("typing:start",u=>{
+ replying.innerText = `${u} typing…`;
+ replying.style.display="block";
+});
+
+socket.on("typing:stop", ()=>{
+ if(!replyTo){
+  replying.style.display="none";
+ }
+});
+
+input.onkeydown=e=>{
+ if(e.key==="Enter" && input.value.trim()){
+  socket.emit("msg",{ text:input.value, replyTo });
+  replyTo=null;
+  replying.style.display="none";
+  input.value="";
+ }
+};
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    // jab tab wapas active ho
+    document.querySelectorAll(".msg").forEach(el => {
+      const id = el.dataset.id;
+      const tick = el.querySelector(".tick");
+
+      if (id && tick && tick.classList.contains("delivered")) {
+        socket.emit("msg:read", id);
+      }
+    });
+  }
+});
+function render(m){
+ const el=document.createElement("div");
+ el.className="msg";
+ el.dataset.id=m._id;
+
+ el.innerHTML=`
+ ${m.replyTo?`
+  <div class="reply-ref">
+   ↪ ${m.replyTo.user}: ${m.replyTo.text.slice(0,40)}
+  </div>`:""}
+ <span class="time">[${new Date(m.created).toLocaleTimeString([],{
+  hour:"2-digit",minute:"2-digit"
+ })}]</span>
+ <span class="${m.user===USER?'self':'other'}">${m.user}@${ROOM}</span>
+ :: ${m.text}
+ ${m.user===USER?`<span class="tick ${m.status}">✔</span>`:""}
+ `;
+
+ chat.appendChild(el);
+
+ el.onclick=()=>{
+  replyTo={
+   messageId:m._id,
+   user:m.user,
+   text:m.text,
+   created:m.created
+  };
+  replying.innerText=`↪ replying to ${m.user}`;
+  replying.style.display="block";
+ };
+
+ chat.scrollTop=chat.scrollHeight;
+}
+</script>
+</body>
+</html>
+(
+=>
+{
+
+=
+.
+
+	
+(	
+&&
+&&
+	.
+bash: line 1: .: filename argument required
+.: usage: . filename [arguments]
+	bash: -c: line 1: unexpected EOF while looking for matching `"'
+bash: -c: line 2: syntax error: unexpected end of file
+
